@@ -84,7 +84,7 @@ impl<'a> State<'a> {
             &wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 compatible_surface: Some(&surface),
-                force_fallback_adapter: false,
+                force_fallback_adapter: false
             },
         ).await.expect("Failed to request adapter!");
 
@@ -119,7 +119,7 @@ impl<'a> State<'a> {
             format: surface_format,
             width: size.width,
             height: size.height,
-            present_mode: surface_caps.present_modes[0],
+            present_mode: wgpu::PresentMode::AutoVsync,
             alpha_mode: surface_caps.alpha_modes[0],
             view_formats: vec![],
             desired_maximum_frame_latency: 2,
@@ -249,7 +249,7 @@ impl<'a> State<'a> {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            camera_controller: CameraController::new(0.3),
+            camera_controller: CameraController::new(10.),
             
             vertex_buffer,
             index_buffer,
@@ -278,8 +278,8 @@ impl<'a> State<'a> {
         }
     }
 
-    fn update(&mut self) {
-        self.camera_controller.update_camera(&mut self.camera);
+    fn update(&mut self, delta_time: f32) {
+        self.camera_controller.update_camera(&mut self.camera, delta_time);
         self.camera_uniform.update_view_proj(&self.camera);
         self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
     }
@@ -335,6 +335,7 @@ impl<'a> State<'a> {
 #[derive(Default)]
 struct App<'a> {
     state: Option<State<'a>>,
+    last_draw: Option<std::time::Instant>
 }
 
 impl<'a> ApplicationHandler for App<'a> {
@@ -362,8 +363,21 @@ impl<'a> ApplicationHandler for App<'a> {
             WindowEvent::RedrawRequested => {
                 // Tell winit we want another frame after this
                 state.get_window().request_redraw();
+
+                let delta_time = match self.last_draw {
+                    Some(last) => {
+                        let now = std::time::Instant::now();
+                        let delta = now.duration_since(last).as_secs_f32();
+                        self.last_draw = Some(now);
+                        delta
+                    }
+                    None => {
+                        self.last_draw = Some(std::time::Instant::now());
+                        0.0 // First frame, no delta time
+                    }
+                };
                 
-                state.update();
+                state.update(delta_time);
                 match state.render() {
                     Ok(_) => {}
                     // Reconfigure the surface if it's lost or outdated
