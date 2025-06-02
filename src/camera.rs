@@ -1,4 +1,5 @@
-use winit::{event::{ElementState, KeyEvent}, keyboard::{KeyCode, PhysicalKey}};
+use cgmath::{EuclideanSpace, Quaternion, Rad, Rotation, Rotation3, Vector3, Zero};
+use winit::{dpi::PhysicalSize, event::{ElementState, KeyEvent, WindowEvent}, keyboard::{KeyCode, PhysicalKey}};
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone, bytemuck::Pod, bytemuck::Zeroable)]
@@ -21,8 +22,7 @@ impl CameraUniform {
 
 pub struct Camera {
     eye: cgmath::Point3<f32>,
-    target: cgmath::Point3<f32>,
-    up: cgmath::Vector3<f32>,
+    rotation: cgmath::Quaternion<f32>,
     aspect: f32,
     fovy: f32,
     znear: f32,
@@ -40,8 +40,7 @@ impl Camera {
     pub fn new(aspect: f32, fovy: f32, znear: f32, zfar: f32) -> Camera {
         Camera {
             eye: (0.0, 1.0, 2.0).into(),
-            target: (0.0, 0.0, 0.0).into(),
-            up: cgmath::Vector3::unit_y(),
+            rotation: cgmath::Quaternion::from_angle_y(cgmath::Rad(0.0)),
             aspect, fovy, znear, zfar
         }
     }
@@ -51,7 +50,7 @@ impl Camera {
     }
 
     fn build_view_projection_matrix(&self) -> cgmath::Matrix4<f32> {
-        let view = cgmath::Matrix4::look_at_rh(self.eye, self.target, self.up);
+        let view = cgmath::Matrix4::from(self.rotation) * cgmath::Matrix4::from_translation(-self.eye.to_vec());
         let proj = cgmath::perspective(cgmath::Deg(self.fovy), self.aspect, self.znear, self.zfar);
 
         return OPENGL_TO_WGPU_MATRIX * proj * view;
@@ -60,30 +59,42 @@ impl Camera {
 
 pub struct CameraController {
     speed: f32,
+
+    yaw: f32,
+    pitch: f32,
+
     is_forward_pressed: bool,
     is_backward_pressed: bool,
     is_left_pressed: bool,
     is_right_pressed: bool,
+    is_up_pressed: bool,
+    is_down_pressed: bool
 }
 
 impl CameraController {
     pub fn new(speed: f32) -> Self {
         Self {
             speed,
+            
+            yaw: 0.0,
+            pitch: 0.0,
+
             is_forward_pressed: false,
             is_backward_pressed: false,
             is_left_pressed: false,
             is_right_pressed: false,
+            is_up_pressed: false,
+            is_down_pressed: false
         }
     }
 
-    pub fn input(&mut self, event: &KeyEvent) -> bool {
+    pub fn handle_event(&mut self, event: &WindowEvent, size: PhysicalSize<u32>) -> bool {
         match event {
-            KeyEvent {
+            WindowEvent::KeyboardInput { event: KeyEvent {
                 state,
                 physical_key: PhysicalKey::Code(keycode),
                 ..
-            } => {
+            }, .. } => {
                 let is_pressed = *state == ElementState::Pressed;
                 match keycode {
                     KeyCode::KeyW | KeyCode::ArrowUp => {
@@ -102,44 +113,76 @@ impl CameraController {
                         self.is_right_pressed = is_pressed;
                         true
                     }
+                    KeyCode::Space => {
+                        self.is_up_pressed = is_pressed;
+                        true
+                    }
+                    KeyCode::ShiftLeft => {
+                        self.is_down_pressed = is_pressed;
+                        true
+                    }
                     _ => false,
                 }
-            }
+            },
+            WindowEvent::CursorMoved { position, .. } => {
+                let delta = cgmath::Vector2::new(
+                    position.x as f32 - size.width as f32 / 2.0,
+                    position.y as f32 - size.height as f32 / 2.0,
+                );
+                // Update camera rotation based on cursor movement
+                let sensitivity = 0.001;
+
+                self.yaw += delta.x * sensitivity;
+                self.pitch += delta.y * sensitivity;
+
+                // Clamp pitch to avoid flipping
+                let pitch_limit = std::f32::consts::FRAC_PI_2 * (5.0 / 6.0);
+                self.pitch = self.pitch.clamp(-pitch_limit, pitch_limit);
+
+                true
+            },
             _ => false,
         }
     }
 
     pub fn update_camera(&self, camera: &mut Camera, delta_time: f32) {
         use cgmath::InnerSpace;
-        let forward = camera.target - camera.eye;
-        let forward_norm = forward.normalize();
-        let forward_mag = forward.magnitude();
 
-        let speed = self.speed * delta_time;
+        let up = Vector3::unit_y();
+        let forward = camera.rotation.conjugate() * Vector3::unit_z();
+        let forward = Vector3::new(forward.x, 0.0, forward.z).normalize();
+        let right = forward.cross(up).normalize();
+        
+        let mut movement = Vector3::zero();
 
-        // Prevents glitching when the camera gets too close to the
-        // center of the scene.
-        if self.is_forward_pressed && forward_mag > speed {
-            camera.eye += forward_norm * speed;
+        if self.is_forward_pressed {
+            movement -= forward;
         }
         if self.is_backward_pressed {
-            camera.eye -= forward_norm * speed;
-        }
-
-        let right = forward_norm.cross(camera.up);
-
-        // Redo radius calc in case the forward/backward is pressed.
-        let forward = camera.target - camera.eye;
-        let forward_mag = forward.magnitude();
-
-        if self.is_right_pressed {
-            // Rescale the distance between the target and the eye so 
-            // that it doesn't change. The eye, therefore, still 
-            // lies on the circle made by the target and eye.
-            camera.eye = camera.target - (forward + right * speed).normalize() * forward_mag;
+            movement += forward;
         }
         if self.is_left_pressed {
-            camera.eye = camera.target - (forward - right * speed).normalize() * forward_mag;
+            movement += right;
         }
+        if self.is_right_pressed {
+            movement -= right;
+        }
+        if self.is_up_pressed {
+            movement += up;
+        }
+        if self.is_down_pressed {
+            movement -= up;
+        }
+
+        if movement.magnitude() > 0.0 {
+            movement = movement.normalize() * self.speed * delta_time;
+            camera.eye += movement;
+        }
+
+        let yaw_rot = Quaternion::from_angle_y(Rad(self.yaw));
+        let pitch_rot = Quaternion::from_angle_x(Rad(self.pitch));
+
+        // Apply pitch after yaw
+        camera.rotation = pitch_rot * yaw_rot;
     }
 }

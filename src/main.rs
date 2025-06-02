@@ -2,15 +2,13 @@ use std::sync::Arc;
 
 use wgpu::util::DeviceExt;
 use winit::{
-    application::ApplicationHandler,
-    event::{KeyEvent, WindowEvent},
-    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
-    window::{Window, WindowId},
+    application::ApplicationHandler, event::{ElementState, KeyEvent, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, keyboard::{KeyCode, PhysicalKey}, window::{CursorGrabMode, Window, WindowId}
 };
 
-use crate::camera::{Camera, CameraController, CameraUniform};
+use crate::{camera::{Camera, CameraController, CameraUniform}, teapot::{INDICES, VERTICES}};
 
 mod camera;
+mod teapot;
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
@@ -33,19 +31,6 @@ impl Vertex {
         }
     }
 }
-const VERTICES: &[Vertex] = &[
-    Vertex { position: [-0.0868241, 0.49240386, 0.0], color: [0.5, 0.0, 0.5] },
-    Vertex { position: [-0.49513406, 0.06958647, 0.0], color: [0.5, 0.0, 0.5] },
-    Vertex { position: [-0.21918549, -0.44939706, 0.0], color: [0.5, 0.0, 0.5] },
-    Vertex { position: [0.35966998, -0.3473291, 0.0], color: [0.5, 0.0, 0.5] },
-    Vertex { position: [0.44147372, 0.2347359, 0.0], color: [0.5, 0.0, 0.5] },
-];
-
-const INDICES: &[u16] = &[
-    0, 1, 4,
-    1, 2, 4,
-    2, 3, 4,
-];
 
 struct State<'a> {
     surface: wgpu::Surface<'a>,
@@ -249,7 +234,7 @@ impl<'a> State<'a> {
             camera_uniform,
             camera_buffer,
             camera_bind_group,
-            camera_controller: CameraController::new(10.),
+            camera_controller: CameraController::new(5.),
             
             vertex_buffer,
             index_buffer,
@@ -261,8 +246,8 @@ impl<'a> State<'a> {
         &self.window
     }
 
-    fn input(&mut self, event: KeyEvent) {
-        self.camera_controller.input(&event);
+    fn handle_event(&mut self, event: WindowEvent) {
+        self.camera_controller.handle_event(&event, self.size);
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
@@ -335,6 +320,7 @@ impl<'a> State<'a> {
 #[derive(Default)]
 struct App<'a> {
     state: Option<State<'a>>,
+    window: Option<Arc<Window>>,
     last_draw: Option<std::time::Instant>
 }
 
@@ -349,6 +335,10 @@ impl<'a> ApplicationHandler for App<'a> {
 
         let state = pollster::block_on(State::new(window.clone()));
         self.state = Some(state);
+        self.window = Some(window.clone());
+
+        window.set_cursor_grab(CursorGrabMode::Confined).expect("Failed to grab cursor");
+        window.set_cursor_visible(false);
 
         window.request_redraw();
     }
@@ -401,10 +391,36 @@ impl<'a> ApplicationHandler for App<'a> {
                 // here as this event is always followed up by redraw request.
                 state.resize(size);
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                state.input(event);
+            WindowEvent::KeyboardInput { event, .. } if event.physical_key == PhysicalKey::Code(KeyCode::Escape) => {
+                // If the Escape key is pressed, we exit the application.
+                println!("Escape key pressed; stopping");
+                event_loop.exit();
             }
-            _ => (),
+            WindowEvent::KeyboardInput { event: KeyEvent {
+                physical_key: PhysicalKey::Code(KeyCode::F11), state: ElementState::Pressed, repeat: false, ..
+            }, .. } => {
+                // Toggle fullscreen mode
+                if let Some(window) = self.window.as_ref() {
+                    if window.fullscreen().is_some() {
+                        window.set_fullscreen(None);
+                        window.set_cursor_grab(CursorGrabMode::Confined).expect("Failed to grab cursor");
+                    } else {
+                        window.set_fullscreen(Some(winit::window::Fullscreen::Borderless(None)));
+                        window.set_cursor_grab(CursorGrabMode::None).expect("Failed to release cursor");
+                    }
+                }
+            }
+            WindowEvent::CursorMoved { .. } => {
+                let center = winit::dpi::PhysicalPosition::new(
+                    state.size.width as f64 / 2.0,
+                    state.size.height as f64 / 2.0,
+                );
+                self.window.as_ref().unwrap().set_cursor_position(center)
+                    .expect("Failed to set cursor position");
+                // Forward the event to state
+                state.handle_event(event);
+            }
+            _ => state.handle_event(event),
         }
     }
 }
