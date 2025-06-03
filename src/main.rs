@@ -5,33 +5,12 @@ use winit::{
     application::ApplicationHandler, event::{ElementState, KeyEvent, WindowEvent}, event_loop::{ActiveEventLoop, ControlFlow, EventLoop}, keyboard::{KeyCode, PhysicalKey}, window::{CursorGrabMode, Window, WindowId}
 };
 
-use crate::{camera::{Camera, CameraController, CameraUniform}, teapot::{INDICES, VERTICES}, texture::Texture};
+use crate::{camera::{Camera, CameraController, CameraUniform}, model::{DrawModel, Model, Vertex}, texture::Texture};
 
 mod camera;
-mod teapot;
 mod texture;
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
-struct Vertex {
-    position: [f32; 3],
-    color: [f32; 3],
-}
-
-impl Vertex {
-    const ATTRIBS: [wgpu::VertexAttribute; 2] =
-        wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3];
-
-    fn desc() -> wgpu::VertexBufferLayout<'static> {
-        use std::mem;
-
-        wgpu::VertexBufferLayout {
-            array_stride: mem::size_of::<Self>() as wgpu::BufferAddress,
-            step_mode: wgpu::VertexStepMode::Vertex,
-            attributes: &Self::ATTRIBS,
-        }
-    }
-}
+mod model;
+mod resources;
 
 struct State<'a> {
     surface: wgpu::Surface<'a>,
@@ -49,9 +28,7 @@ struct State<'a> {
     camera_bind_group: wgpu::BindGroup,
     camera_controller: CameraController,
 
-    vertex_buffer: wgpu::Buffer,
-    index_buffer: wgpu::Buffer,
-    num_indices: u32
+    model: Model
 }
 
 impl<'a> State<'a> {
@@ -158,7 +135,7 @@ impl<'a> State<'a> {
 
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
         
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shader.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("gBufferShader.wgsl"));
         let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[
@@ -174,7 +151,7 @@ impl<'a> State<'a> {
                 module: &shader,
                 entry_point: Some("vs_main"),
                 buffers: &[
-                    Vertex::desc()
+                    model::ModelVertex::desc()
                 ],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
@@ -215,21 +192,8 @@ impl<'a> State<'a> {
             multiview: None,
             cache: None
         });
-        
-        let vertex_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Vertex Buffer"),
-                contents: bytemuck::cast_slice(VERTICES),
-                usage: wgpu::BufferUsages::VERTEX,
-            }
-        );
-        let index_buffer = device.create_buffer_init(
-            &wgpu::util::BufferInitDescriptor {
-                label: Some("Index Buffer"),
-                contents: bytemuck::cast_slice(INDICES),
-                usage: wgpu::BufferUsages::INDEX,
-            }
-        );
+
+        let model = Model::load("teapot.obj", &device).await.expect("Failed to load model");
 
         State {
             surface,
@@ -246,10 +210,8 @@ impl<'a> State<'a> {
             camera_buffer,
             camera_bind_group,
             camera_controller: CameraController::new(5.),
-            
-            vertex_buffer,
-            index_buffer,
-            num_indices: INDICES.len() as u32
+
+            model
         }
     }
 
@@ -298,9 +260,9 @@ impl<'a> State<'a> {
                 resolve_target: None,
                 ops: wgpu::Operations {
                     load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.1,
-                        g: 0.2,
-                        b: 0.3,
+                        r: 0.0,
+                        g: 0.0,
+                        b: 0.0,
                         a: 1.0,
                     }),
                     store: wgpu::StoreOp::Store,
@@ -322,10 +284,8 @@ impl<'a> State<'a> {
         render_pass.set_pipeline(&self.render_pipeline);
 
         render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
-        render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
-        render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-
-        render_pass.draw_indexed(0..self.num_indices, 0, 0..1);
+        
+        render_pass.draw_model(&self.model);
 
         // End the renderpass.
         drop(render_pass);
