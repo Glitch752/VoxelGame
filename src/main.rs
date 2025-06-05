@@ -135,7 +135,7 @@ impl<'a> State<'a> {
 
         let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
         
-        let shader = device.create_shader_module(wgpu::include_wgsl!("gBufferShader.wgsl"));
+        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/gBufferShader.wgsl"));
         let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Render Pipeline Layout"),
             bind_group_layouts: &[

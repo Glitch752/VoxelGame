@@ -31,12 +31,12 @@ struct GBufferOutput {
   @location(0) normal: vec4f,
   @location(1) color: vec3f
   // r: smoothness, g: emissive, b: unused?
-//   @location(2) texture_data: vec3f
+  // @location(2) texture_data: vec3f
 }
 
 @fragment
 fn fs_main(in: VertexOutput) -> GBufferOutput {
-    var output : GBufferOutput;
+    var output: GBufferOutput;
     output.normal = vec4(normalize(in.normal), 1.0);
     output.color = in.color;
 
