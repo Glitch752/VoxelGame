@@ -23,10 +23,8 @@ fn vs_main(
 }
 
 struct GBufferOutput {
-  @location(0) normal: vec4f,
-  @location(1) color: vec3f
-  // r: smoothness, g: emissive, b: unused?
-  // @location(2) texture_data: vec3f
+  @location(0) normal: vec4f, // a: smoothness?
+  @location(1) color: vec4f // a: emissive?
 }
 
 @fragment

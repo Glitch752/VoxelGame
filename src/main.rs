@@ -19,8 +19,12 @@ struct State<'a> {
     config: wgpu::SurfaceConfiguration,
     size: winit::dpi::PhysicalSize<u32>,
     window: Arc<Window>,
-    render_pipeline: wgpu::RenderPipeline,
+
+    gbuf_render_pipeline: wgpu::RenderPipeline,
     depth_texture: Texture,
+    normal_texture: Texture,
+    color_texture: Texture,
+    lighting_render_pipeline: wgpu::RenderPipeline,
 
     camera: Camera,
     camera_uniform: CameraUniform,
@@ -133,20 +137,22 @@ impl<'a> State<'a> {
             label: Some("camera_bind_group"),
         });
 
-        let depth_texture = texture::Texture::create_depth_texture(&device, &config, "depth_texture");
+        let depth_texture = texture::Texture::create_gbuf_texture(&device, &config, "depth_texture", true);
+        let normal_texture = texture::Texture::create_gbuf_texture(&device, &config, "normal_texture", false);
+        let color_texture = texture::Texture::create_gbuf_texture(&device, &config, "color_texture", false);
         
         let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/gBufferShader.wgsl"));
-        let render_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("Render Pipeline Layout"),
+        let gbuf_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("G-Buffer Render Pipeline Layout"),
             bind_group_layouts: &[
                 &camera_bind_group_layout
             ],
             push_constant_ranges: &[],
         });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
+        let gbuf_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("G-Buffer Render Pipeline"),
+            layout: Some(&gbuf_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
                 entry_point: Some("vs_main"),
@@ -193,6 +199,63 @@ impl<'a> State<'a> {
             cache: None
         });
 
+        let lighting_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("Lighting Pipeline Layout"),
+            bind_group_layouts: &[
+                // TODO
+            ],
+            push_constant_ranges: &[],
+        });
+        let lighting_render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Lighting Pipeline"),
+            layout: Some(&lighting_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                buffers: &[
+                    model::ModelVertex::desc()
+                ],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    // TODO
+                    format: config.format,
+                    blend: Some(wgpu::BlendState::REPLACE),
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                strip_index_format: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
+                polygon_mode: wgpu::PolygonMode::Fill,
+                // Requires Features::DEPTH_CLIP_CONTROL
+                unclipped_depth: false,
+                // Requires Features::CONSERVATIVE_RASTERIZATION
+                conservative: false,
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: texture::Texture::DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::Less,
+                stencil: wgpu::StencilState::default(),
+                bias: wgpu::DepthBiasState::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: 1,
+                mask: !0,
+                alpha_to_coverage_enabled: false,
+            },
+            multiview: None,
+            cache: None
+        });
+
         let model = Model::load("teapot.obj", &device).await.expect("Failed to load model");
 
         State {
@@ -202,8 +265,12 @@ impl<'a> State<'a> {
             queue,
             size,
             config,
-            render_pipeline,
+
+            gbuf_render_pipeline,
             depth_texture,
+            normal_texture,
+            color_texture,
+            lighting_render_pipeline,
 
             camera,
             camera_uniform,
@@ -234,7 +301,9 @@ impl<'a> State<'a> {
             self.camera_uniform.update_view_proj(&self.camera);
             self.queue.write_buffer(&self.camera_buffer, 0, bytemuck::cast_slice(&[self.camera_uniform]));
 
-            self.depth_texture = texture::Texture::create_depth_texture(&self.device, &self.config, "depth_texture");
+            self.depth_texture = texture::Texture::create_gbuf_texture(&self.device, &self.config, "depth_texture", true);
+            self.normal_texture = texture::Texture::create_gbuf_texture(&self.device, &self.config, "normal_texture", false);
+            self.color_texture = texture::Texture::create_gbuf_texture(&self.device, &self.config, "color_texture", false);
         }
     }
 
@@ -281,7 +350,7 @@ impl<'a> State<'a> {
         });
 
         // If you wanted to call any drawing commands, they would go here.
-        render_pass.set_pipeline(&self.render_pipeline);
+        render_pass.set_pipeline(&self.gbuf_render_pipeline);
 
         render_pass.set_bind_group(0, &self.camera_bind_group, &[]);
         
