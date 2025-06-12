@@ -24,6 +24,7 @@ struct State<'a> {
     depth_texture: Texture,
     normal_texture: Texture,
     color_texture: Texture,
+    gbuf_bind_group: wgpu::BindGroup,
     lighting_render_pipeline: wgpu::RenderPipeline,
 
     camera: Camera,
@@ -199,6 +200,71 @@ impl<'a> State<'a> {
             cache: None
         });
 
+        let gbuf_bind_group_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("G-Buffer Bind Group Layout"),
+            entries: &[
+                // 0: normal sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // 1: normal texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                },
+
+                // 2: color sampler
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                // 3: color texture
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        multisampled: false,
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    },
+                    count: None,
+                }
+            ]
+        });
+        let gbuf_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &gbuf_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Sampler(&normal_texture.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&normal_texture.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::Sampler(&color_texture.sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::TextureView(&color_texture.view),
+                }
+            ],
+            label: Some("G-Buffer Bind Group"),
+        });
+
         let lighting_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Lighting Pipeline Layout"),
             bind_group_layouts: &[
@@ -270,6 +336,7 @@ impl<'a> State<'a> {
             depth_texture,
             normal_texture,
             color_texture,
+            gbuf_bind_group,
             lighting_render_pipeline,
 
             camera,
@@ -291,7 +358,7 @@ impl<'a> State<'a> {
     }
 
     fn resize(&mut self, new_size: winit::dpi::PhysicalSize<u32>) {
-         if new_size.width > 0 && new_size.height > 0 {
+        if new_size.width > 0 && new_size.height > 0 {
             self.size = new_size;
             self.config.width = new_size.width;
             self.config.height = new_size.height;

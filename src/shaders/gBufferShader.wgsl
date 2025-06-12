@@ -35,8 +35,8 @@ struct GBufferOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> GBufferOutput {
     var output: GBufferOutput;
-    output.normal = normalize(in.normal);
-    output.color = in.color;
+    output.normal = vec4(normalize(in.normal), 1.0);
+    output.color = vec4(in.color, 1.0);
 
     return output;
 }
