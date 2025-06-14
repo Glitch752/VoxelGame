@@ -142,7 +142,7 @@ impl<'a> State<'a> {
         let normal_texture = texture::Texture::create_gbuf_texture(&device, &config, "normal_texture", false);
         let color_texture = texture::Texture::create_gbuf_texture(&device, &config, "color_texture", false);
         
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shaders/gBufferShader.wgsl"));
+        let g_buffer_shader = device.create_shader_module(wgpu::include_wgsl!("shaders/gBufferShader.wgsl"));
         let gbuf_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("G-Buffer Render Pipeline Layout"),
             bind_group_layouts: &[
@@ -155,7 +155,7 @@ impl<'a> State<'a> {
             label: Some("G-Buffer Render Pipeline"),
             layout: Some(&gbuf_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &g_buffer_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[
                     model::ModelVertex::desc()
@@ -163,7 +163,7 @@ impl<'a> State<'a> {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &g_buffer_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
@@ -206,18 +206,18 @@ impl<'a> State<'a> {
                 // 0: normal sampler
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
                 // 1: normal texture
                 wgpu::BindGroupLayoutEntry {
                     binding: 1,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     },
                     count: None,
                 },
@@ -225,18 +225,18 @@ impl<'a> State<'a> {
                 // 2: color sampler
                 wgpu::BindGroupLayoutEntry {
                     binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::NonFiltering),
                     count: None,
                 },
                 // 3: color texture
                 wgpu::BindGroupLayoutEntry {
                     binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                     ty: wgpu::BindingType::Texture {
                         multisampled: false,
                         view_dimension: wgpu::TextureViewDimension::D2,
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     },
                     count: None,
                 }
@@ -265,10 +265,11 @@ impl<'a> State<'a> {
             label: Some("G-Buffer Bind Group"),
         });
 
+        let lighting_shader = device.create_shader_module(wgpu::include_wgsl!("shaders/lightingShader.wgsl"));
         let lighting_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Lighting Pipeline Layout"),
             bind_group_layouts: &[
-                // TODO
+                &gbuf_bind_group_layout
             ],
             push_constant_ranges: &[],
         });
@@ -276,7 +277,7 @@ impl<'a> State<'a> {
             label: Some("Lighting Pipeline"),
             layout: Some(&lighting_pipeline_layout),
             vertex: wgpu::VertexState {
-                module: &shader,
+                module: &lighting_shader,
                 entry_point: Some("vs_main"),
                 buffers: &[
                     model::ModelVertex::desc()
@@ -284,7 +285,7 @@ impl<'a> State<'a> {
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
-                module: &shader,
+                module: &lighting_shader,
                 entry_point: Some("fs_main"),
                 targets: &[Some(wgpu::ColorTargetState {
                     // TODO
@@ -531,8 +532,7 @@ impl<'a> ApplicationHandler for App<'a> {
                     state.size.width as f64 / 2.0,
                     state.size.height as f64 / 2.0,
                 );
-                self.window.as_ref().unwrap().set_cursor_position(center)
-                    .expect("Failed to set cursor position");
+                let _ = self.window.as_ref().unwrap().set_cursor_position(center); // Don't unwrap; this can fail.
                 // Forward the event to state
                 state.handle_event(event);
             }

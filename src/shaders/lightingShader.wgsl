@@ -17,7 +17,7 @@ fn vs_main(
     @builtin(vertex_index) id: u32,
 ) -> VertexOutput {
     var out: VertexOutput;
-	var uv = vec2<f32>((id << 1) & 2, id & 2);
+	var uv = vec2<f32>(f32((id << 1) & 2), f32(id & 2));
     out.clip_position = vec4<f32>(uv * vec2<f32>(2, -2) + vec2<f32>(-1, 1), 0.0, 1.0);
     return out;
 }
@@ -30,8 +30,8 @@ struct GBufferOutput {
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     var input: GBufferOutput;
-    input.normal = textureSample(normalTexture, normalSampler, in.clip_position);
-    input.color = textureSample(colorTexture, colorSampler, in.clip_position);
+    input.normal = textureSample(normalTexture, normalSampler, in.clip_position.xy);
+    input.color = textureSample(colorTexture, colorSampler, in.clip_position.xy);
 
     // TODO
 
